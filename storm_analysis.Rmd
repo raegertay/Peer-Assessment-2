@@ -1,0 +1,159 @@
+---
+title: Most Harmful Types of Weather Event on Population Health & Economy in US between
+  1950 and 2011
+author: "Raeger Tay"
+date: "22 July 2015"
+output:
+  html_document:
+    fig_caption: yes
+    keep_md: yes
+  pdf_document:
+    fig_caption: yes
+---
+
+##Synopsis
+The aim of this paper is to identify the most harmful types of weather event on the population health as well as the economy in US between 1950 and 2011. The dataset used in this analysis is the Storm Data prepared by US National Weather Service. For the subject on population health, the event types are ranked according to the number of casualties. A casualty is defined as a person who is either dead or injured from the weather event. The most harmful event types identified are "Tornado", "Excessive Heat" & "TSTM Wind" among others. On the economy, the consequences of weather events are assessed based on the total monetary damage incurred on properties and crops. The worst event types identified are "Flood", "Hurricane/Typhoon" & "Tornado" among others. Finally, the event types that are most harmful to the country are identified based on the intersection of the previous two analysis, and "Tornado" tops the list.
+
+##Data Processing
+
+[Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)  
+[National Weather Service Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)  
+[National Climatic Data Center Storm Events FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)  
+
+
+The packages used in this analysis are "dplyr", "ggplot2", and "reshape2".  
+```{r, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+The dataset is first loaded and some inspections are performed.
+```{r, cache=TRUE}
+dat <- read.csv('repdata-data-StormData.csv.bz2')
+dat <- tbl_df(dat)
+dim(dat)
+names(dat)
+```
+
+The dataset consists of 37 variables and 902297 observations. The 7 variables that are relevant to the analysis are as follows:  
+
+* EVTYPE - type of weather event
+* FATALITIES - number of fatalities 
+* INJURIES - number of injuries 
+* PROPDMG - coefficient for the property damage 
+* PROPDMGEXP - multiplier for PROPDMG 
+* CROPDMG - coefficient for crop damage
+* CROPMDGEXP - multiplier for CROPDMG 
+
+
+```{r}
+with(dat, sum(is.na(FATALITIES)))
+with(dat, sum(is.na(INJURIES)))
+with(dat, sum(is.na(PROPDMG)))
+with(dat, sum(is.na(CROPDMG)))
+```
+There are no missing values for the relevant variables.  
+<br>
+```{r}
+n_distinct(dat$EVTYPE)
+```
+Given that there are 985 distinct event types, this paper aims to identify the top 1% most harmful types, which amounts to 10 event types.
+
+### Population Health
+The 10 event types with the highest casualty counts are extracted. The casualty count is calculated by summing the number of fatalities and injuries. Casualty count is preferred to either the individual fatality or injury count as it accounts for all the people harmed in the weather events, regardless if it results in death. The average casualty count is used to break tie, if any. The summarised data is as shown below.
+```{r}
+casualty_top10 <- dat %>%
+        group_by(EVTYPE) %>%
+        summarise(casualty.total = sum(FATALITIES, INJURIES), 
+                  casualty.mean = sum(FATALITIES, INJURIES)/n(),
+                  Fatality = sum(FATALITIES), Injury = sum(INJURIES), 
+                  event.count = n()) %>%
+        arrange(desc(casualty.total), desc(casualty.mean)) %>%
+        head(10)
+options(dplyr.width = Inf)
+casualty_top10 
+```
+
+
+### Economy
+Taking a look at the damage multiplier.
+```{r}
+levels(dat$PROPDMGEXP)
+levels(dat$CROPDMGEXP)
+```
+The multipliers come in various characters, ranging from "blank" character to symbols and letters. For the purpose of extracting the highest damage, only the "B", "M" and "m" multiplier are used in the calculation. They represent billion and million for the latter two. The rest can be safely ignored as their magnitudes are at least a [few order smaller][1].
+
+[1]: https://rstudio-pubs-static.s3.amazonaws.com/58957_37b6723ee52b455990e149edde45e5b6.html "few order smaller"
+
+<br>
+The 10 event types with highest total damage are extracted. Total damage is calculated by multiplying the property and crop coefficent with their respective multiplier. The total damage is preferred to either the individual property or crop damage as it accounts for a more complete representation of the economy. The data is as summariesed below.
+```{r}
+expTable <- data.frame(exp = c("B", "M", "m"), value = c(9, 6, 6))
+economic_top10 <- dat %>% 
+        filter(PROPDMGEXP %in% expTable$exp | CROPDMGEXP %in% expTable$exp) %>%
+        mutate(prop_expValue = expTable$value[match(PROPDMGEXP, expTable$exp)],
+               crop_expValue = expTable$value[match(CROPDMGEXP, expTable$exp)],
+               Property = PROPDMG * 10^prop_expValue, Crop = CROPDMG * 10^crop_expValue) %>%
+        group_by(EVTYPE) %>%
+        summarise(dmg.total = sum(Property, Crop, na.rm = TRUE), dmg.mean = dmg.total/n(),
+                  Property = sum(Property, na.rm = TRUE), Crop = sum(Crop, na.rm = TRUE), 
+                  event.count = n()) %>%
+        arrange(desc(dmg.total)) %>%
+        head(10)
+economic_top10       
+```
+
+
+##Results
+
+```{r, fig.cap="Top 10 Event Types in Casualty Count from 1950-2011"}
+casualty_top10$EVTYPE <- with(casualty_top10, factor(EVTYPE, as.character(EVTYPE)))
+casualty_top10 <- melt(casualty_top10, 
+                       id.vars = c("EVTYPE", "casualty.total", "casualty.mean", "event.count"), 
+                       variable.name = "Casualty")
+g1 <- ggplot(data = casualty_top10, aes(EVTYPE, value/1000, fill = Casualty)) 
+g1 + geom_bar(stat = "identity") +
+        labs(x = "Event Type", y = "No of Casualties (in thousands)", 
+             title = "Top 10 Event Types in Casualty Count from 1950-2011") +
+        scale_y_continuous(breaks = seq(0,100,10)) +
+        coord_flip()
+```  
+
+Figure 1 shows that the top-placed event type "Tornado" has more than 10 times the casualty counts compared to the second-placed "Excessive Heat". This is due to its relatively high casualty mean and event count, both in 3rd place in the list. It is also worth noting that a large percetange of casualties do not result in death, as illustrated in the figure.
+
+```{r, fig.cap="Top 10 Event Types in Economic Consequences from 1950-2011"}
+economic_top10$EVTYPE <- with(economic_top10, factor(EVTYPE, as.character(EVTYPE)))
+economic_top10 <- melt(economic_top10, 
+                       id.vars = c("EVTYPE", "dmg.total","dmg.mean", "event.count"), 
+                       variable.name = "Economy")
+g2 <- ggplot(data = economic_top10, aes(EVTYPE, value/1000000000, fill = Economy)) 
+g2 + geom_bar(stat = "identity") +
+        labs(x = "Event Type", y = "USD (in billions)", 
+             title = "Top 10 Event Types in Economic Consequences from 1950-2011") +
+        scale_y_continuous(breaks = seq(0,150,20)) +
+        coord_flip()
+```
+
+Figure 2 shows that most of the economic consequences from the weather events are due to property damages, with the exception of "Drought".
+
+<br>
+
+Finally, the events that are repeated in both figures are as follows.
+```{r}
+intersect(casualty_top10$EVTYPE, economic_top10$EVTYPE)
+```
+Overall, these four event types are most harmful to the country in general.
+
+##Conclusion
+This paper has explored the most harmful weather event types in terms of population health and the economy. The top 10 most harmful event types for each category are presented. The most harmful event types to the country are then found by the intersection of the above 2 categories.
+
+
+## References
+
+* https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+* https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf
+* https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf
+* https://rstudio-pubs-static.s3.amazonaws.com/58957_37b6723ee52b455990e149edde45e5b6.html
+
+*The codes in this paper are ran with R Version 3.2.1 in Windows 8.1.*
